@@ -1,0 +1,13 @@
+chromadb>=0.5.5
+numpy
+pypdf>=4
+beautifulsoup4
+bs4
+lxml
+markdownify
+python-dotenv
+sentence_transformers
+scikit-learn
+pandas
+flask
+flask-cors
