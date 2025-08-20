@@ -6,8 +6,10 @@ bs4
 lxml
 markdownify
 python-dotenv
-sentence_transformers
+sentence-transformers
 scikit-learn
 pandas
 flask
 flask-cors
+requests
+gunicorn

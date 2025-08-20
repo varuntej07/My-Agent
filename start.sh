@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 set -euo pipefail
 
 # Ensure the Chroma path exists (baked-in index will sit here)
@@ -11,4 +11,4 @@ ollama serve &
 sleep 2
 
 # Start Flask via Gunicorn, binding to the Cloud Run port
-exec gunicorn --bind 0.0.0.0:${PORT:-8080} --timeout 300 --workers 1 server:app
+cd scripts && exec gunicorn --bind 0.0.0.0:${PORT:-8080} --timeout 300 --workers 1 server:app

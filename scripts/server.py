@@ -1,15 +1,20 @@
+import os
 from flask import Flask, request, jsonify
 import chromadb
 import ollama
+from flask_cors import CORS
 
 CHROMA_DIR = "storage/chroma"
 COLLECTION = "varun_kb"
 LLM_MODEL = "llama3.2:3b-instruct-q4_K_M"
-
 TOP_K = 4
 MAX_OUT = 400
 
 app = Flask(__name__)
+CORS(app, resources={
+    "/ask": {"origins": ["https://varuntej.dev", "http://localhost:3000"]}
+})
+
 
 def build_prompt(query: str, context_chunks: list[str]) -> str:
     context = "\n\n---\n\n".join(context_chunks or [])
@@ -28,20 +33,17 @@ Context (snippets about Varun):
 {context}
 """
 
-def retrieve_context(q: str) -> list[str]:
+def retrieve_context(query: str) -> list[str]:
     client = chromadb.PersistentClient(path=CHROMA_DIR)
-    coll = client.get_collection(COLLECTION)
-    res = coll.query(query_texts=[q], n_results=TOP_K)
-    return (res.get("documents") or [[]])[0]
-
-@app.get("/health")
-def health():
-    return jsonify({"ok": True})
+    collection = client.get_collection(COLLECTION)
+    result = collection.query(query_texts=[query], n_results=TOP_K)
+    return (result.get("documents") or [[]])[0]
 
 @app.post("/ask")
 def ask():
     data = request.get_json(force=True, silent=True) or {}
     query = (data.get("query") or "").strip()
+
     if not query:
         return jsonify({"error": "Missing 'query'"}), 400
     try:
@@ -61,4 +63,5 @@ def ask():
         return jsonify({"error": str(e)}), 500
 
 if __name__ == "__main__":
-    app.run(host="127.0.0.1", port=8000, debug=False)
+    port = int(os.environ.get('PORT', 8080))
+    app.run(host='0.0.0.0', port=port, debug=False)
