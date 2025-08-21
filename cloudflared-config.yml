@@ -1,0 +1,7 @@
+tunnel: varun-clone
+credentials-file: C:\Users\varun\.cloudflared\079df5d0-8144-40e9-aab6-35a827f82baf.json
+
+ingress:
+  - hostname: api.varuntej.dev
+    service: http://localhost:8080
+  - service: http_status:404
