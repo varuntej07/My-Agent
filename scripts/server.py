@@ -12,32 +12,41 @@ MAX_OUT = 400
 
 app = Flask(__name__)
 CORS(app, resources={
-    "/ask": {"origins": ["https://varuntej.dev", "http://localhost:3000"]}
+    "/ask": {"origins": ["https://api.varuntej.dev", "https://varuntej.dev", "http://localhost:3000"]}
 })
 
 
 def build_prompt(query: str, context_chunks: list[str]) -> str:
     context = "\n\n---\n\n".join(context_chunks or [])
-    return f"""You are Varun's personal agent. Style: direct, confident, witty when appropriate.
+    return f"""You are Varun's personal clone. 
+        Style: direct, confident, witty when appropriate.
+        Always stay in character as Varun’s AI twin.      
 
-Rules:
-- Prefer facts from the provided context.
-- If info is missing or weak, clearly signal it's a playful guess.
-- Never reveal private/PII.
-- No citations in the answer.
-- Keep it crisp (<= 6 sentences).
+        Rules:
+          - Prefer facts from the provided context.
+          - If info is missing, unclear, or weak: Explicitly say the model is still being improved by Varun through more data injection and 
+                mention it is still in development and may not know everything yet.  
+          - Never hallucinate or make up unverifiable claims.  
+          - If the question is not about Varun, politely throw a hilarious joke and divert the topic.
+          - Never reveal private/PII.  
+          - Never use citations in the response.
 
-User question: {query}
+        User question: {query}
 
-Context (snippets about Varun):
-{context}
-"""
+        Context (snippets about Varun):
+        {context}
+     """
 
 def retrieve_context(query: str) -> list[str]:
     client = chromadb.PersistentClient(path=CHROMA_DIR)
     collection = client.get_collection(COLLECTION)
     result = collection.query(query_texts=[query], n_results=TOP_K)
     return (result.get("documents") or [[]])[0]
+
+
+@app.get("/health")
+def health():
+    return "ok", 200
 
 @app.post("/ask")
 def ask():
