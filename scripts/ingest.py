@@ -1,4 +1,4 @@
-import os, glob, hashlib, datetime, json
+﻿import os, glob, hashlib, datetime, json
 from pathlib import Path
 import chromadb
 from chromadb.utils import embedding_functions
@@ -12,6 +12,7 @@ CHUNK_OVERLAP = 120                      # how much chunks overlap to avoid mid-
 EMBED_MODEL_NAME = "all-MiniLM-L6-v2"    # Embedding model name from SentenceTransformers
 
 DATA_DIR = Path("data/raw")              # all the knowledge files to ingest are here
+EMBEDDINGS_JSON_PATH = "storage/embeddings.json"  # Pre-computed embeddings export
 
 
 # Embedding wrapper: makes MiniLM look like a Chroma EmbeddingFunction
@@ -93,6 +94,52 @@ def load_file(path: Path) -> tuple[str, dict]:
 
     return text, meta
 
+def export_embeddings_to_json(collection, output_path: str):
+    """Export all chunks and their embeddings from ChromaDB to JSON file"""
+    try:
+        # Get all documents from the collection
+        result = collection.get(include=['documents', 'embeddings', 'metadatas'])
+        
+        if not result['ids']:
+            print("No documents found in collection to export")
+            return
+            
+        # Build the JSON structure
+        export_data = {
+            "model_name": EMBED_MODEL_NAME,
+            "chunk_size": CHUNK_SIZE,
+            "chunk_overlap": CHUNK_OVERLAP,
+            "exported_at": datetime.datetime.now().isoformat(),
+            "chunks": []
+        }
+        
+        for i, chunk_id in enumerate(result['ids']):
+            # Convert numpy array to list for JSON serialization
+            embedding = result['embeddings'][i]
+            if hasattr(embedding, 'tolist'):
+                embedding = embedding.tolist()
+            
+            chunk_data = {
+                "id": chunk_id,
+                "text": result['documents'][i],
+                "embedding": embedding,
+                "metadata": result['metadatas'][i] if result['metadatas'] else {}
+            }
+            export_data["chunks"].append(chunk_data)
+        
+        # Ensure storage directory exists
+        os.makedirs(os.path.dirname(output_path), exist_ok=True)
+        
+        # Write to JSON file
+        with open(output_path, 'w', encoding='utf-8') as f:
+            json.dump(export_data, f, ensure_ascii=False, indent=2)
+        
+        print(f"Exported {len(export_data['chunks'])} chunks with embeddings to {output_path}")
+        print(f"Model: {EMBED_MODEL_NAME}")
+        print(f"File size: {os.path.getsize(output_path) / 1024:.1f} KB")
+        
+    except Exception as e:
+        print(f"Failed to export embeddings: {e}")
 
 def main():
     # 1) Open/Create a persistent Chroma database in CHROMA_DIR
@@ -166,8 +213,11 @@ def main():
     # 4) Write everything into Chroma. Re-running with identical content just overwrites the same ids (no duplication).
     coll.upsert(ids=add_ids, documents=add_docs, metadatas=add_metas)
     print(f"Upserted {len(add_ids)} chunks into collection '{COLLECTION}'")
-
-
-
+    
+    # 5) Auto-export embeddings to JSON for fast server startup
+    print("\n Auto-exporting embeddings to JSON...")
+    export_embeddings_to_json(coll, EMBEDDINGS_JSON_PATH)
+    
+    
 if __name__ == "__main__":
     main()
