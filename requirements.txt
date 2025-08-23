@@ -12,3 +12,6 @@ pandas
 flask
 flask-cors
 requests
+waitress
+openai>=1.35.0
+streamlit>=1.48.0
