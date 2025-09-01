@@ -42,6 +42,14 @@ def load_embeddings():
     try:
         with open(EMBEDDINGS_JSON_PATH, 'r', encoding='utf-8') as f:
             embeddings_data = json.load(f)
+
+            # L2-normalize all stored embeddings once at load time
+            for ch in embeddings_data.get('chunks', []):
+                v = np.asarray(ch['embedding'], dtype=np.float32)
+                n = np.linalg.norm(v)
+                if n > 0:
+                    v = v / n
+                ch['embedding'] = v.tolist()  # overwrite with normalized vector
         
         # Load the embedding model for query encoding
         embedding_model = SentenceTransformer(EMBED_MODEL_NAME)
@@ -75,7 +83,12 @@ def retrieve_context(query: str) -> list[str]:
     
     try:
         # Embed the query using the same model
-        query_embedding = embedding_model.encode([query])[0]
+        query_embedding = embedding_model.encode([query])[0].astype(np.float32)
+        
+        # ensures the query is also a unit vector, so cosine becomes a pure dot product
+        q_norm = np.linalg.norm(query_embedding)
+        if q_norm > 0:
+            query_embedding = query_embedding / q_norm
         
         # Calculate similarities with all chunks
         similarities = []
@@ -104,22 +117,22 @@ User question: {query}"""
     
     context = "\n\n---\n\n".join(context_chunks)
     return f"""You are Varun's personal clone. 
-Style: direct, confident, witty when appropriate.
-Always stay in character as Varun's AI twin.      
+            Style: direct, confident, witty when appropriate.
+            Always stay in character as Varun's AI twin.      
 
-Rules:
-- Prefer facts from the provided context.
-- If info is missing, unclear, or weak: Explicitly say "Varun is still improving the model by injecting more data. This is in active development, so it may not know everything yet."
-- Never hallucinate or make up unverifiable claims.  
-- If the question is not about Varun, politely throw a hilarious joke and divert the topic.
-- Never reveal private/PII.  
-- Never use citations in the response.
+            Rules:
+            - Prefer facts from the provided context.
+            - If info is missing, unclear, or weak: Explicitly say "Varun is still improving the model by injecting more data. This is in active development, so it may not know everything yet."
+            - Never hallucinate or make up unverifiable claims.  
+            - If the question is not about Varun, politely throw a hilarious joke and divert the topic.
+            - Never reveal private/PII.  
+            - Never use citations in the response.
 
-User question: {query}
+            User question: {query}
 
-Context (snippets about Varun):
-{context}
-"""
+            Context (snippets about Varun):
+            {context}
+            """
 
 def _answer_with_openai(prompt: str) -> str:
     if not OPENAI_API_KEY:
