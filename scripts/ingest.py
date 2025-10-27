@@ -11,8 +11,9 @@ CHUNK_SIZE = 800                         # how big each text chunk is (character
 CHUNK_OVERLAP = 120                      # how much chunks overlap to avoid mid-sentence cuts
 EMBED_MODEL_NAME = "all-MiniLM-L6-v2"    # Embedding model name from SentenceTransformers
 
-DATA_DIR = Path("data/raw")              # all the knowledge files to ingest are here
-EMBEDDINGS_JSON_PATH = "storage/embeddings.json"  # Pre-computed embeddings export
+DATA_DIR = Path("data/Ooink")
+# DATA_DIR = Path("data/my raw data")              # all the knowledge files to ingest are here
+EMBEDDINGS_JSON_PATH = "storage/ooink_embeddings.json"  # Pre-computed embeddings export
 
 
 # Embedding wrapper: makes MiniLM look like a Chroma EmbeddingFunction
@@ -35,16 +36,58 @@ def load_pdf(path: Path) -> str:
 def load_md_or_txt(path: Path) -> str:
     return path.read_text(encoding="utf-8", errors="ignore")
 
-def load_html(path: Path) -> str:
-    html = path.read_text(encoding="utf-8", errors="ignore")
-    soup = BeautifulSoup(html, "lxml")
-
-    for tag in soup(["script", "style", "noscript"]):
-        tag.decompose()
-
-    text = soup.get_text(separator="\n")
-    text = "\n".join(line.strip() for line in text.splitlines() if line.strip())
-    return text
+def load_json_kb(path: Path) -> str:
+    """
+    Load and flatten a knowledge base JSON file into readable text for embedding. 
+    Preserves structure but makes it text-friendly.
+    
+    Handles nested dicts, lists, and produces natural language output.
+    """
+    try:
+        with open(path, 'r', encoding='utf-8') as f:
+            data = json.load(f)
+    except json.JSONDecodeError as e:
+        print(f"Error parsing JSON in {path}: {e}")
+        return ""
+    
+    text_parts = []
+    
+    def flatten_value(key: str, value, depth: int = 0) -> str:
+        """Recursively convert any JSON value to readable text"""
+        indent = "  " * depth
+        
+        if isinstance(value, dict):
+            # For dicts, show key-value pairs
+            lines = [f"{key}:"]
+            for k, v in value.items():
+                lines.append(flatten_value(k, v, depth + 1))
+            return "\n".join(lines)
+        
+        elif isinstance(value, list):
+            # For lists, show items
+            lines = [f"{key}:"]
+            for i, item in enumerate(value):
+                if isinstance(item, (dict, list)):
+                    lines.append(flatten_value(f"Item {i+1}", item, depth + 1))
+                else:
+                    lines.append(f"{indent}  - {item}")
+            return "\n".join(lines)
+        
+        elif isinstance(value, bool):
+            return f"{indent}{key}: {str(value)}"
+        
+        elif value is None:
+            return f"{indent}{key}: (not specified)"
+        
+        else:
+            # Strings, numbers, etc.
+            return f"{indent}{key}: {value}"
+    
+    # Top-level structure
+    for key, value in data.items():
+        text_parts.append(flatten_value(key, value))
+    
+    return "\n".join(text_parts)
 
 # Chunking: splits long text into overlapping windows
 def chunk_text(text: str, size: int = CHUNK_SIZE, overlap: int = CHUNK_OVERLAP) -> list[str]:
@@ -83,12 +126,17 @@ def load_file(path: Path) -> tuple[str, dict]:
     elif ext in (".md", ".txt"):
         meta["source"] = "markdown" if ext == ".md" else "text"
         text = load_md_or_txt(path)
-    elif ext in (".html", ".htm"):
-        meta["source"] = "html"
-        text = load_html(path)
-    elif ext == ".json" and "ig" in path.stem.lower():
-        meta["source"] = "instagram"
-        text = load_instagram_json(path)
+    elif ext == ".json":
+        # Handle ANY JSON file
+        if "menu" in path.stem.lower() or "kb" in path.stem.lower():
+            meta["source"] = "knowledge_base"
+        elif "ig" in path.stem.lower():
+            meta["source"] = "instagram"
+        else:
+            meta["source"] = "json_data"
+        
+        # Use intelligent JSON loader
+        text = load_json_kb(path)
     else:
         text = ""
 
@@ -175,7 +223,7 @@ def main():
     files = [Path(p) for p in sorted(set(files)) if Path(p).is_file()]
 
     if not files:
-        print("No files found in data/raw. Add resume.pdf / skills.md first.")
+        print(f"No files found in {DATA_DIR}. Add files to embed...")
         return
 
     print(f"Found {len(files)} files")
