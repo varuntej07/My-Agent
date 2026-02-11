@@ -4,16 +4,17 @@ import chromadb
 from chromadb.utils import embedding_functions
 from bs4 import BeautifulSoup
 from pypdf import PdfReader
+from docx import Document
 
 CHROMA_DIR = "storage/chroma"            # where Chroma stores its index files
 COLLECTION = "varun_kb"
-CHUNK_SIZE = 800                         # how big each text chunk is (characters)
-CHUNK_OVERLAP = 120                      # how much chunks overlap to avoid mid-sentence cuts
+CHUNK_SIZE = 800                         # sized to fit one structured block per chunk
+CHUNK_OVERLAP = 150                      # overlap to capture block boundaries
 EMBED_MODEL_NAME = "all-MiniLM-L6-v2"    # Embedding model name from SentenceTransformers
 
-DATA_DIR = Path("data/Ooink")
-# DATA_DIR = Path("data/my raw data")              # all the knowledge files to ingest are here
-EMBEDDINGS_JSON_PATH = "storage/ooink_embeddings.json"  # Pre-computed embeddings export
+# DATA_DIR = Path("data/Ooink")
+DATA_DIR = Path("data/my raw data")              # all the knowledge files to ingest are here
+EMBEDDINGS_JSON_PATH = "storage/embeddings.json"  # Pre-computed embeddings export
 
 
 # Embedding wrapper: makes MiniLM look like a Chroma EmbeddingFunction
@@ -32,6 +33,14 @@ def load_pdf(path: Path) -> str:
         txt = p.extract_text() or ""
         pages.append(txt)
     return "\n".join(pages)
+
+def load_docx(path: Path) -> str:
+    doc = Document(str(path))
+    paragraphs = []
+    for paragraph in doc.paragraphs:
+        if paragraph.text.strip():
+            paragraphs.append(paragraph.text)
+    return "\n".join(paragraphs)
 
 def load_md_or_txt(path: Path) -> str:
     return path.read_text(encoding="utf-8", errors="ignore")
@@ -89,18 +98,47 @@ def load_json_kb(path: Path) -> str:
     
     return "\n".join(text_parts)
 
-# Chunking: splits long text into overlapping windows
+# Chunking: splits text into chunks that respect semantic block boundaries.
+# Blocks are separated by double newlines. Small blocks are merged until they
+# would exceed the size limit. Large blocks are split with overlap.
 def chunk_text(text: str, size: int = CHUNK_SIZE, overlap: int = CHUNK_OVERLAP) -> list[str]:
-    text = " ".join(text.split())
+    # Split on double-newline to get logical blocks (projects, roles, etc.)
+    blocks = [b.strip() for b in text.split("\n\n") if b.strip()]
+
     chunks = []
-    i = 0
-    while i < len(text):
-        chunk = text[i:i+size]
-        if not chunk:
-            break
-        chunks.append(chunk)
-        i += max(size - overlap, 1)
-    return chunks
+    current = ""
+
+    for block in blocks:
+        # Normalize whitespace within a block but preserve block boundaries
+        block = " ".join(block.split())
+
+        if not current:
+            current = block
+        elif len(current) + len(block) + 1 <= size:
+            # Merge small adjacent blocks
+            current = current + " " + block
+        else:
+            # Flush current chunk
+            chunks.append(current)
+            current = block
+
+    if current:
+        chunks.append(current)
+
+    # Split any oversized chunks using character-based fallback
+    final = []
+    for chunk in chunks:
+        if len(chunk) <= size:
+            final.append(chunk)
+        else:
+            i = 0
+            while i < len(chunk):
+                piece = chunk[i:i + size]
+                if piece:
+                    final.append(piece)
+                i += max(size - overlap, 1)
+
+    return final
 
 # Helpers: hashing for dedup; metadata for traceability
 def sha256(s: str) -> str:
@@ -123,6 +161,9 @@ def load_file(path: Path) -> tuple[str, dict]:
     if ext == ".pdf":
         meta["source"] = "resume" if "resume" in path.stem.lower() else "pdf"
         text = load_pdf(path)
+    elif ext == ".docx":
+        meta["source"] = "resume" if "resume" in path.stem.lower() else "docx"
+        text = load_docx(path)
     elif ext in (".md", ".txt"):
         meta["source"] = "markdown" if ext == ".md" else "text"
         text = load_md_or_txt(path)
@@ -134,7 +175,7 @@ def load_file(path: Path) -> tuple[str, dict]:
             meta["source"] = "instagram"
         else:
             meta["source"] = "json_data"
-        
+
         # Use intelligent JSON loader
         text = load_json_kb(path)
     else:
@@ -208,6 +249,7 @@ def main():
     # 2) find files to ingest in data/raw
     patterns = [
         str(DATA_DIR / "*.pdf"),
+        str(DATA_DIR / "*.docx"),
         str(DATA_DIR / "*.md"),
         str(DATA_DIR / "*.txt"),
         str(DATA_DIR / "*.html"),

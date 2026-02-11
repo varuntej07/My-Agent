@@ -107,37 +107,35 @@ def retrieve_context(query: str) -> list[str]:
         print(f"❌ Error during retrieval: {e}")
         return []
 
-def build_prompt(query: str, context_chunks: list[str]) -> str:
+SYSTEM_PROMPT = """You are an AI assistant that answers questions about Varun Tej — a software engineer with a Master's in Computer Science from Seattle University.
+
+Your job is to provide clear, accurate, and professional responses based ONLY on the provided context.
+
+Rules:
+1. Answer in third person (say "Varun" or "he", never "I" or "me").
+2. Be concise and factual. Do not add filler, jokes, or unnecessary commentary.
+3. Stick strictly to the provided context. If the context does not contain enough information to answer the question, respond with: "I don't have enough information about that yet. Varun is still adding more data to this agent."
+4. Never hallucinate or invent details not present in the context.
+5. Never reveal private information like phone numbers, addresses, or API keys.
+6. If the question is completely unrelated to Varun, politely say: "I'm Varun's AI assistant and can only answer questions about him. Feel free to ask about his work, skills, or experience."
+7. Do not use citations, markdown headers, or bullet points unless the answer genuinely benefits from a list format.
+8. Keep responses under 150 words unless the question requires more detail."""
+
+def build_prompt(query: str, context_chunks: list[str]) -> tuple[str, str]:
+    """Returns (system_message, user_message) tuple."""
     if not context_chunks:
-        return f"""You are Varun's personal clone, but you must respond exactly with this message:
+        system = SYSTEM_PROMPT
+        user = f"Question: {query}\n\nContext: No relevant context was found."
+        return system, user
 
-"Varun is still improving the model by injecting more data. This is in active development, so it may not know everything yet."
-
-User question: {query}"""
-    
     context = "\n\n---\n\n".join(context_chunks)
-    return f"""You are Varun's personal clone. 
-            Style: direct, confident, witty when appropriate.
-            Always stay in character as Varun's AI twin.      
+    user = f"Question: {query}\n\nContext:\n{context}"
+    return SYSTEM_PROMPT, user
 
-            Rules:
-            - Prefer facts from the provided context.
-            - If info is missing, unclear, or weak: Explicitly say "Varun is still improving the model by injecting more data. This is in active development, so it may not know everything yet."
-            - Never hallucinate or make up unverifiable claims.  
-            - If the question is not about Varun, politely throw a hilarious joke and divert the topic.
-            - Never reveal private/PII.  
-            - Never use citations in the response.
-
-            User question: {query}
-
-            Context (snippets about Varun):
-            {context}
-            """
-
-def _answer_with_openai(prompt: str) -> str:
+def _answer_with_openai(system_msg: str, user_msg: str) -> str:
     if not OPENAI_API_KEY:
         return ""
-    
+
     try:
         response = requests.post(
             "https://api.openai.com/v1/chat/completions",
@@ -147,26 +145,30 @@ def _answer_with_openai(prompt: str) -> str:
             },
             json={
                 "model": "gpt-4o-mini",
-                "messages": [{"role": "user", "content": prompt}],
-                "temperature": 0.7,
+                "messages": [
+                    {"role": "system", "content": system_msg},
+                    {"role": "user", "content": user_msg},
+                ],
+                "temperature": 0.3,
                 "max_tokens": MAX_OUT,
             },
             timeout=90
         )
-        
+
         print(f"OpenAI status code: {response.status_code}")
-        
+
         if response.status_code == 200:
             data = response.json()
             if "choices" in data and data["choices"]:
                 content = data["choices"][0]["message"]["content"].strip()
-                print(f"Varun' clone replied: {content[:100]}...")
+                print(f"Response: {content[:100]}...")
                 return content
-        
-        print(f"Varun' clone failed to answer - Status: {response.status_code}, Response: {response.text[:200]}")
+
+        print(f"OpenAI error - Status: {response.status_code}, Response: {response.text[:200]}")
         return ""
-        
+
     except Exception as e:
+        print(f"OpenAI request failed: {e}")
         return ""
 
 @app.route("/health", methods=["GET"])
@@ -198,11 +200,11 @@ def ask():
                 "context_used": []
             }), 503
         
-        prompt = build_prompt(query, ctx)
-        content = _answer_with_openai(prompt)
-        
+        system_msg, user_msg = build_prompt(query, ctx)
+        content = _answer_with_openai(system_msg, user_msg)
+
         if not content:
-            content = "WTF!!!!! why is there no content"
+            content = "Sorry, I couldn't generate a response right now. Please try again."
         
         return jsonify({"answer": content, "context_used": ctx})
         
